@@ -36,6 +36,7 @@ import java.net.URL;
 import java.sql.*;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 
 @Slf4j
@@ -47,7 +48,11 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
     private String jdbcURL = "jdbc:mysql://localhost:3306/senderbot?useSSL=false";
     private String username = "root";
     private String password = "root";
+    String code = "";
     private Map<Long, Boolean> awaitingFile = new HashMap<>();
+    private Map<Long, Boolean> awaitingSenderFile = new HashMap<>();
+    private Map<Long, Boolean> awaitingCode = new HashMap<>();
+    private Map<Long, String> userSentCodes = new HashMap<>();
     @Override
     public String getBotUsername() {
         return config.getBotName();
@@ -68,6 +73,18 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
             chatId = update.getMessage().getChatId();
 
             if(update.getMessage().hasText()){
+                String messageText = update.getMessage().getText();
+                System.out.println("send text: " + messageText);
+                // Якщо бот чекає на код від користувача
+                if (awaitingCode.getOrDefault(chatId, false)) {
+                    // Зберігаємо код у мапу
+                    userSentCodes.put(chatId, messageText);
+                    // Вимикаємо стан очікування коду
+                    awaitingCode.put(chatId, false);
+                    code = messageText;
+                    sendMessageToChat("Код отримано. Обробляємо його...", chatId);
+                    return;
+                }
                 if(user != null)
                     checkText(update, chatId, user);
                 if(user == null && update.getMessage().getText().equals("/start"))
@@ -77,7 +94,6 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
                     Document document = update.getMessage().getDocument();
 
                     String fileName = document.getFileName();
-                    System.out.println("2222 " + fileName);
                     if (fileName.endsWith(".xls") || fileName.endsWith(".xlsx")) {
                         try (InputStream fileStream = downloadFileAsStream(document)) {
                             if (fileStream != null) {
@@ -98,21 +114,54 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
                     } else {
                         sendMessageToChat("Отриманий файл не є Excel файлом. Будь ласка, надішліть файл у форматі .xls або .xlsx.", chatId);
                     }
-                } else {
+                }else if(awaitingSenderFile.getOrDefault(chatId, false)){
+                    Document document = update.getMessage().getDocument();
+
+                    String fileName = document.getFileName();
+                    if (fileName.endsWith(".xls") || fileName.endsWith(".xlsx")) {
+                        try (InputStream fileStream = downloadFileAsStream(document)) {
+                            if (fileStream != null) {
+                                sendMessageToChat("Бот отримав і обробляє Excel файл: " + fileName, chatId);
+                                System.out.println("Бот отримав і обробляє Excel файл: " + fileName);
+                                addUserForSenderToBd(fileStream);
+                                awaitingSenderFile.put(chatId, false);
+                                sendMessageToChat("Бот завершив обробку, вся інформація додана до бази з файлу: " + fileName, chatId);
+                            } else {
+                                sendMessageToChat("Помилка під час отримання файлу.", chatId);
+                                System.out.println("Помилка під час отримання файлу... ");
+                            }
+                        } catch (IOException e) {
+                            sendMessageToChat("Помилка під час обробки файлу: " + e.getMessage(), chatId);
+                            System.out.println("Помилка під час отримання файлу... ");
+                            e.printStackTrace();
+                        }
+                    } else {
+                        sendMessageToChat("Отриманий файл не є Excel файлом. Будь ласка, надішліть файл у форматі .xls або .xlsx.", chatId);
+                    }
+                }else {
                     sendMessageToChat("Цей бот не очікував файл від вас. Для початку надішліть команду /add_data_in_db_nickname.", chatId);
                 }
 
             }
         }
     }
-
+    private String getUserSentCode(Long chatId) {
+        // Перевіряємо чи є код у мапі
+        if (userSentCodes.containsKey(chatId)) {
+            return userSentCodes.get(chatId);
+        } else {
+            return null; // Повертаємо null, якщо код ще не отриманий
+        }
+    }
     private void checkText(Update update, Long chatId, User user) {
         if (update.getMessage().getText().equals("/start_send")) {
-            try {
-                authorizeAndSendMessages(update);
-            }catch (Exception e) {
-                System.out.println("Whats happens wrong 1");
-            }
+            CompletableFuture.runAsync(() -> {
+                try {
+                    authorizeAndSendMessages(update);
+                } catch (Exception e) {
+                    System.out.println("Whats happens wrong 1");
+                }
+            });
         } else if (update.getMessage().getText().equals("/get_command")) {
             String command = "Бот має наступні команди:\n /start_send - це команда для початку роботи бота, " +
                     "\n/get_command - це команда на отримання справки з команд бота" +
@@ -121,12 +170,13 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
                     "\n /add_data_in_db_nickname - це команда яка активує режим в якому бот очікуватиме файл з новими користувачами для розсилки";
             sendMessageToChat(command, chatId);
         } else if (update.getMessage().getText().equals("/add_sender_account")) {
-            // метод для додавання акаунтів для відправки
+            awaitingSenderFile.put(chatId, true);
+            sendMessageToChat("Будь ласка, надішліть файл Excel з акаунтами.", chatId);
         }else if(update.getMessage().getText().equals("/back")){
             awaitingFile.put(chatId, false);
             sendMessageToChat("Стек команд очищено", chatId);
         } else if (update.getMessage().getText().equals("/add_data_in_db_nickname")) {
-            // Встановлюємо для користувача стан очікування файлу
+            // Встановлюємо для користувача стан очікування файлу awaitingSenderFile
             awaitingFile.put(chatId, true);
             sendMessageToChat("Будь ласка, надішліть файл Excel з новими користувачами для розсилки.", chatId);
         }  else {
@@ -175,6 +225,12 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
             user.setName(name);
 
         userService.save(user);
+        String command = "Бот має наступні команди:\n /start_send - це команда для початку роботи бота, " +
+                "\n/get_command - це команда на отримання справки з команд бота" +
+                "\n /add_sender_account - це команда для додавання акаунту з якого буде іти відправка" +
+                "\n /back - це команда для повернення до головного меню та відміна всіх активних статусів бота" +
+                "\n /add_data_in_db_nickname - це команда яка активує режим в якому бот очікуватиме файл з новими користувачами для розсилки";
+        sendMessageToChat(command, update.getMessage().getChatId());
     }
 
     private void sendMessageToChat(String text, Long chatId){
@@ -221,7 +277,6 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
             for (Row row : sheet) {
                 Cell nicknameCell = row.getCell(0);
                 Cell telegramIdCell = row.getCell(1);
-
                 if (nicknameCell != null && telegramIdCell != null) {
                     String nickname = nicknameCell.getStringCellValue();
                     if (telegramIdCell.getCellType() == CellType.NUMERIC) {
@@ -230,6 +285,23 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
                     } else {
                         System.out.println("Телеграм ID не є числовим значенням у рядку: " + row.getRowNum());
                     }
+                } else {
+                    System.out.println("Пропущений рядок: " + row.getRowNum() + " через відсутність даних.");
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+    private void addUserForSenderToBd(InputStream fileStream) {
+        try (XSSFWorkbook workbook = new XSSFWorkbook(fileStream)) {
+            Sheet sheet = workbook.getSheetAt(0);
+
+            for (Row row : sheet) {
+                Cell nicknameCell = row.getCell(0);
+                if (nicknameCell != null) {
+                    String nickname = nicknameCell.getStringCellValue();
+                    insertUserIntoSenderDB(nickname);
                 } else {
                     System.out.println("Пропущений рядок: " + row.getRowNum() + " через відсутність даних.");
                 }
@@ -281,32 +353,90 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
             e.printStackTrace();
         }
     }
+    private static void insertUserIntoSenderDB(String nickname) {
+        String jdbcURL = "jdbc:mysql://localhost:3306/senderbot?useSSL=false";
+        String username = "root";
+        String password = "root";
 
+        String sql = "INSERT INTO credentials (login) VALUES (?, ?)";
+
+        try (Connection conn = DriverManager.getConnection(jdbcURL, username, password);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, nickname);
+
+            pstmt.executeUpdate();
+            System.out.println("User added: " + nickname);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
 
     private void OpenWebTg(int userId, String username, Update update,List<String> usernames, List<Long> telegramIds, int startIndex) throws InterruptedException {
-        System.setProperty("webdriver.chrome.driver", "./chromedriver.exe");
-        WebDriver driver = new ChromeDriver();
-        String url = "https://web.telegram.org/";
 
-        driver.get(url);
-        Thread.sleep(5000);
+            System.setProperty("webdriver.chrome.driver", "./chromedriver.exe");
+            WebDriver driver = new ChromeDriver();
+            String url = "https://web.telegram.org/";
 
-        loadLocalStorage(driver, userId);
+            driver.get(url);
+            Thread.sleep(5000);
+            boolean canAuthorize = loadLocalStorage(driver, userId);
 
-        Thread.sleep(5000);
+            Thread.sleep(5000);
 
-        try {
-            System.out.println("Автоматична авторизація успішна.");
-            //sendMessageToChat("Ви успішно авторизувались через збережені дані для акаунту: " + username, update.getMessage().getChatId());
-            sendMessagesToUsers(driver,usernames, telegramIds, startIndex, update);
-        } catch (NoSuchElementException e) {
-            // Ручна авторизація
-            handleManualAuthorization(driver,usernames, userId, username, update);
-        }
+            if (canAuthorize){
+                try {
+                    System.out.println("Автоматична авторизація успішна.");
+                    //sendMessageToChat("Ви успішно авторизувались через збережені дані для акаунту: " + username, update.getMessage().getChatId());
+                    sendMessagesToUsers(driver, usernames, telegramIds, startIndex, update);
+                    } catch (NoSuchElementException e) {
+                        // Ручна авторизація
+                      System.out.println("Something went wrong");
+                    }
+            }else handleManualAuthorization(driver, usernames, userId, username, update);
+
+            Thread.sleep(2000);
+            driver.quit();
+
+    }
+    /*
+    *  private void handleManualAuthorization(WebDriver driver,List<String> usernames, int userId, String username, Update update) throws InterruptedException {
+        System.out.println("Не вдалося автоматично авторизуватись.");
+
+        sendMessageToChat("Будь ласка, авторизуйтесь вручну в акаунт: " + username, update.getMessage().getChatId());
+
+        System.out.println("Очікування ручної авторизації...");
+
+        WebElement element = driver.findElement(By.xpath("//*[text()='Log in by phone Number']"));
+
+        element.click();
+
+        Thread.sleep(3000);
+        WebElement phoneNumber =  driver.findElement(By.xpath("//*[@aria-label='Your phone number']"));
+        phoneNumber.sendKeys(username);
 
         Thread.sleep(2000);
-        driver.quit();
-    }
+
+        List<WebElement> inputElements = driver.findElements(By.className("input-field-input"));
+        System.out.println("Find elements: " + inputElements.size());
+
+        WebElement phone = inputElements.get(1);
+        phone.clear();
+        phone.sendKeys("+" + username);
+        phone.sendKeys(Keys.ENTER);
+        Thread.sleep(2000);
+
+        sendMessageToChat("На номер телефону або в телеграм буде надіслано код підтвердження, його потрібно надіслати боту щоб підтвердити авторизацію",update.getMessage().getChatId());
+        awaitingCode.put(update.getMessage().getChatId(), true);
+       /* saveLocalStorage(driver, userId);
+
+        System.out.println("Авторизація пройшла успішно. Дані збережені.");
+
+        sendMessageToChat("Авторизація пройшла успішно. Дані збережені для акаунту: " + username, update.getMessage().getChatId());
+
+        List<Long> telegramIds = getTelegramIdsFromDB();
+        sendMessagesToUsers(driver,usernames, telegramIds, 0, update);*/
 
     private void handleManualAuthorization(WebDriver driver,List<String> usernames, int userId, String username, Update update) throws InterruptedException {
         System.out.println("Не вдалося автоматично авторизуватись.");
@@ -315,14 +445,76 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
 
         System.out.println("Очікування ручної авторизації...");
 
+        try {
+            WebElement numberBnt = driver.findElement(By.className("c-ripple"));
+            numberBnt.click();
+        }catch (NoSuchElementException e) {
+            WebElement element = driver.findElement(By.xpath("//*[text()='Log in by phone Number']"));
+            element.click();
+        }
+
+        Thread.sleep(3000);
+
+        try {
+            WebElement phoneNumber = driver.findElement(By.xpath("//*[@data-left-pattern=' ‒‒ ‒‒‒ ‒‒ ‒‒']"));
+            phoneNumber.clear();
+            phoneNumber.sendKeys(username);
+            Thread.sleep(500);
+            phoneNumber.sendKeys(Keys.ENTER);
+        }catch (NoSuchElementException e) {
+            WebElement phoneNumber =  driver.findElement(By.xpath("//*[@aria-label='Your phone number']"));
+            phoneNumber.clear();
+            phoneNumber.sendKeys("+ " + username);
+            phoneNumber.sendKeys(Keys.ENTER);
+            Thread.sleep(2000);
+        }
+
+        Thread.sleep(2000);
+
+        sendMessageToChat("На номер телефону або в телеграм буде надіслано код підтвердження, його потрібно надіслати боту щоб підтвердити авторизацію",update.getMessage().getChatId());
+        awaitingCode.put(update.getMessage().getChatId(), true);
+        while (awaitingCode.get(update.getMessage().getChatId())) {
+            Thread.sleep(1000); // перевіряємо щосекунди чи користувач надіслав код
+        }
+
+        // Отримуємо код, який користувач надіслав
+        String confirmationCode = getUserSentCode(update.getMessage().getChatId());
+
+        if (confirmationCode == null) {
+            sendMessageToChat("Код не отримано. Спробуйте ще раз.", update.getMessage().getChatId());
+            return;
+        }
+        try {
+            WebElement inputCode = driver.findElement(By.tagName("input"));
+            inputCode.sendKeys(code);
+            Thread.sleep(6000);
+        }catch (NoSuchElementException e) {
+            WebElement inputCode = driver.findElement(By.xpath("//input[@type='text']"));
+            inputCode.sendKeys(code);
+            Thread.sleep(6000);
+        }
+
+
+
+        System.out.println("Авторизація пройшла успішно. Дані збережені.");
+
+        sendMessageToChat("Авторизація пройшла успішно. Дані збережені для акаунту: " + username, update.getMessage().getChatId());
         saveLocalStorage(driver, userId);
+
+        List<Long> telegramIds = getTelegramIdsFromDB();
+        sendMessagesToUsers(driver,usernames, telegramIds, 0, update);
+       /* saveLocalStorage(driver, userId);
 
         System.out.println("Авторизація пройшла успішно. Дані збережені.");
 
         sendMessageToChat("Авторизація пройшла успішно. Дані збережені для акаунту: " + username, update.getMessage().getChatId());
 
         List<Long> telegramIds = getTelegramIdsFromDB();
-        sendMessagesToUsers(driver,usernames, telegramIds, 0, update);
+        sendMessagesToUsers(driver,usernames, telegramIds, 0, update);*/
+    }
+    private void continueAutorization(WebDriver driver,int userId, Update update, List<String> usernames) throws InterruptedException {
+
+
     }
 
     public void saveLocalStorage(WebDriver driver, int userId) {
@@ -351,7 +543,7 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
             e.printStackTrace();
         }
     }
-    public void loadLocalStorage(WebDriver driver, int userId) {
+    public boolean loadLocalStorage(WebDriver driver, int userId) {
         try (Connection conn = DriverManager.getConnection(jdbcURL, username, password)) {
             String sql = "SELECT local_storage_data FROM user_local_storage WHERE user_id = ?";
             PreparedStatement statement = conn.prepareStatement(sql);
@@ -372,11 +564,14 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
                 // Після завантаження даних перезавантажуємо сторінку
                 Thread.sleep(2000);  // Додаємо невелику затримку для надійності
                 driver.navigate().refresh();
+                return  true;
             } else {
                 System.out.println("Дані localStorage для користувача з id " + userId + " не знайдено.");
+                return false;
             }
         } catch (Exception e) {
             e.printStackTrace();
+            return false;
         }
     }
     private List<Long> getTelegramIdsFromDB() {
@@ -475,7 +670,8 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
             try {
                 OpenWebTg(userId, accountName, update,usernames, telegramIds, startIndex);
             } catch (Exception e) {
-                System.out.println("Щось пішло не так при авторизації або відправці повідомлень.");
+                sendMessageToChat("Щось пішло не так при авторизації або відправці повідомлень. Повторіть спробу",update.getMessage().getChatId());
+                System.out.println("Щось пішло не так при авторизації або відправці повідомлень. Повторіть спробу");
             }
             startIndex += 15;
             if (startIndex >= telegramIds.size()) {
@@ -540,7 +736,7 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
         // Відправка повідомлення
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(10));
         WebElement messageInput = wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector("div.input-message-input[contenteditable='true']")));
-        messageInput.sendKeys("Ваше повідомлення");
+        messageInput.sendKeys("Доброго дня, підкажіть будь ласка, чи ви ще знаходитесь у пошуках роботи?");
         messageInput.sendKeys(Keys.RETURN);
     }
 
