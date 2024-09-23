@@ -22,6 +22,7 @@ public class User {
     private String name;
     //private UserStatus status;
     private LocalDateTime dateOfCreated;
+    private String newsletterText;
 
     @PrePersist
     private void init(){

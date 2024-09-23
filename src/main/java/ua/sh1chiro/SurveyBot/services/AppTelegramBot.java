@@ -69,6 +69,7 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
         System.out.println("get id: " + update.getMessage().getChatId());;
         User user = userService.getByTelegramId(update.getMessage().getFrom().getId());
 
+
         if (update.hasMessage()) {
             chatId = update.getMessage().getChatId();
 
@@ -154,7 +155,9 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
         }
     }
     private void checkText(Update update, Long chatId, User user) {
-        if (update.getMessage().getText().equals("/start_send")) {
+        String text = update.getMessage().getText();
+
+        if (text.equals("/start_send")) {
             CompletableFuture.runAsync(() -> {
                 try {
                     authorizeAndSendMessages(update);
@@ -162,24 +165,41 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
                     System.out.println("Whats happens wrong 1");
                 }
             });
-        } else if (update.getMessage().getText().equals("/get_command")) {
+        }
+        else if (text.equals("/get_command")) {
             String command = "Бот має наступні команди:\n /start_send - це команда для початку роботи бота, " +
                     "\n/get_command - це команда на отримання справки з команд бота" +
                     "\n /add_sender_account - це команда для додавання акаунту з якого буде іти відправка" +
                     "\n /back - це команда для повернення до головного меню та відміна всіх активних статусів бота" +
                     "\n /add_data_in_db_nickname - це команда яка активує режим в якому бот очікуватиме файл з новими користувачами для розсилки";
             sendMessageToChat(command, chatId);
-        } else if (update.getMessage().getText().equals("/add_sender_account")) {
+        }
+        else if (text.equals("/add_sender_account")) {
             awaitingSenderFile.put(chatId, true);
             sendMessageToChat("Будь ласка, надішліть файл Excel з акаунтами.", chatId);
-        }else if(update.getMessage().getText().equals("/back")){
+        }
+        else if(text.equals("/back")){
             awaitingFile.put(chatId, false);
             sendMessageToChat("Стек команд очищено", chatId);
-        } else if (update.getMessage().getText().equals("/add_data_in_db_nickname")) {
+        }
+        else if (text.equals("/add_data_in_db_nickname")) {
             // Встановлюємо для користувача стан очікування файлу awaitingSenderFile
             awaitingFile.put(chatId, true);
             sendMessageToChat("Будь ласка, надішліть файл Excel з новими користувачами для розсилки.", chatId);
-        }  else {
+        }
+        else if(text.startsWith("/change_text")){
+            String newsletterText = text.replace("/change_text ", "");
+            user.setNewsletterText(newsletterText);
+            userService.save(user);
+            sendMessageToChat("Текст розсилки змінено на:\n" + newsletterText, user.getTelegramId());
+        }
+        else if(text.startsWith("/change_account")){
+            String number = text.replace("/change_account ", "");
+            sendMessageToChat("Команда в розробці.", user.getTelegramId());
+            System.out.println("Number for replace: " + number);
+//            changeSendingAccount();
+        }
+        else {
             sendMessageToChat("Неочікуваний вхід. Спробуйте ввести одну з доступних команд.", chatId);
         }
     }
@@ -224,12 +244,19 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
         if(name != null)
             user.setName(name);
 
+        user.setNewsletterText("Ваше повідомлення.");
+
         userService.save(user);
-        String command = "Бот має наступні команди:\n /start_send - це команда для початку роботи бота, " +
-                "\n/get_command - це команда на отримання справки з команд бота" +
-                "\n /add_sender_account - це команда для додавання акаунту з якого буде іти відправка" +
-                "\n /back - це команда для повернення до головного меню та відміна всіх активних статусів бота" +
-                "\n /add_data_in_db_nickname - це команда яка активує режим в якому бот очікуватиме файл з новими користувачами для розсилки";
+        String command = "Бот має наступні команди:" +
+                "\n/start_send - команда для початку роботи;" +
+                "\n/get_command - команда на отримання справки з команд бота;" +
+                "\n/add_sender_account - команда для додавання акаунту, з якого буде відбуватись відправка повідомлень;" +
+                "\n/back - команда для повернення до головного меню та відміна всіх активних статусів бота;" +
+                "\n/add_data_in_db_nickname - команда, яка активує режим, в якому бот очікуватиме файл з новими користувачами для розсилки;" +
+                "\n/change_account %номер% - команда для зміни аккаунта, з якого відбувається розсилка;" +
+                "\n/change_text %текст% - команда, що змінює текст розсилки. За замовчуванням - \"Ваше повідомлення\"" +
+                "\nПриклад:" +
+                "\n/change_text Привіт, гарного дня! - для розсилки буде встановлена фраза \"Привіт, гарного дня!\".";
         sendMessageToChat(command, update.getMessage().getChatId());
     }
 
@@ -512,6 +539,11 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
         List<Long> telegramIds = getTelegramIdsFromDB();
         sendMessagesToUsers(driver,usernames, telegramIds, 0, update);*/
     }
+
+    private void changeSendingAccount(WebDriver driver, String username, int chatId, Update update){
+
+    }
+
     private void continueAutorization(WebDriver driver,int userId, Update update, List<String> usernames) throws InterruptedException {
 
 
@@ -709,26 +741,31 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
     }
 
     private void sendMessagesToUsers(WebDriver driver, List<String> usernames, List<Long> telegramIds, int startIndex, Update update) throws InterruptedException {
-        int count = 0;
-        for (int i = startIndex; i < telegramIds.size() && count < 15; i++) {
-            String username = usernames.get(i);
-            long telegramId = telegramIds.get(i);
+        User user = userService.getByTelegramId(update.getMessage().getChatId());
+        if(user != null) {
+            int count = 0;
+            for (int i = startIndex; i < telegramIds.size() && count < 15; i++) {
+                String username = usernames.get(i);
+                long telegramId = telegramIds.get(i);
 
-            if (username != null && !username.isEmpty()) {
-                sendMessageToTelegramUsername(driver, username);
-            } else {
-                sendMessageToTelegramId(driver, telegramId);
+                if (username != null && !username.isEmpty()) {
+                    sendMessageToTelegramUsername(driver, username, user.getNewsletterText());
+                } else {
+                    sendMessageToTelegramId(driver, telegramId, user.getNewsletterText());
+                }
+
+                count++;
+                Thread.sleep(10000);
             }
 
-            count++;
-            Thread.sleep(10000);
+            System.out.println("Відправлено " + count + " повідомлень.");
+            sendMessageToChat("Відправлено " + count + " повідомлень.", update.getMessage().getChatId());
         }
-
-        System.out.println("Відправлено " + count + " повідомлень.");
-        sendMessageToChat("Відправлено " + count + " повідомлень.", update.getMessage().getChatId());
     }
 
-    private void sendMessageToTelegramUsername(WebDriver driver, String username) throws InterruptedException {
+    String text = "";
+
+    private void sendMessageToTelegramUsername(WebDriver driver, String username, String newsletterText) throws InterruptedException {
         String tgUrl = "https://web.telegram.org/k/#?tgaddr=tg%3A%2F%2Fresolve%3Fdomain%3D" + username;
         driver.get(tgUrl);
         Thread.sleep(2000);
@@ -736,11 +773,11 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
         // Відправка повідомлення
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(10));
         WebElement messageInput = wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector("div.input-message-input[contenteditable='true']")));
-        messageInput.sendKeys("Доброго дня, підкажіть будь ласка, чи ви ще знаходитесь у пошуках роботи?");
+        messageInput.sendKeys(newsletterText);
         messageInput.sendKeys(Keys.RETURN);
     }
 
-    private void sendMessageToTelegramId(WebDriver driver, long telegramId) throws InterruptedException {
+    private void sendMessageToTelegramId(WebDriver driver, long telegramId, String newsletterText) throws InterruptedException {
         String tgUrl = "https://web.telegram.org/k/#?tgaddr=tg%3A%2F%2Fresolve%3Fdomain%3D" + telegramId;
         driver.get(tgUrl);
         Thread.sleep(2000);
@@ -748,7 +785,7 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
         // Відправка повідомлення
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(10));
         WebElement messageInput = wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector("div.input-message-input[contenteditable='true']")));
-        messageInput.sendKeys("Ваше повідомлення");
+        messageInput.sendKeys(newsletterText);
         messageInput.sendKeys(Keys.RETURN);
     }
     private void sendMessageToTelegramNickName(WebDriver driver, String nickName) throws InterruptedException {
