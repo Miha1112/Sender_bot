@@ -45,9 +45,9 @@ import java.util.concurrent.CompletableFuture;
 public class AppTelegramBot  extends TelegramLongPollingBot {
     private final BotConfig config;
     private final UserService userService;
-    private String jdbcURL = "jdbc:mysql://localhost:3306/senderbot?useSSL=false";
-    private String username = "root";
-    private String password = "root";
+    private String jdbcURL = "jdbc:mysql://51.75.70.29:3306/senderbot?useSSL=false";
+    private String username = "officeboy";
+    private String password = "officeboy";
     String code = "";
     private Map<Long, Boolean> awaitingFile = new HashMap<>();
     private Map<Long, Boolean> awaitingSenderFile = new HashMap<>();
@@ -345,7 +345,6 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
         }
     }
 
-
     private InputStream downloadFileAsStream(Document document) {
         System.out.println("Start adding Excel file");
 
@@ -366,9 +365,9 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
         }
     }
     private static void insertUserIntoDB(String nickname, long telegramId) {
-        String jdbcURL = "jdbc:mysql://localhost:3306/senderbot?useSSL=false";
-        String username = "root";
-        String password = "root";
+        String jdbcURL = "jdbc:mysql://51.75.70.29:3306/senderbot?useSSL=false";
+        String username = "officeboy";
+        String password = "officeboy";
 
         String sql = "INSERT INTO users (nickname, telegram_id) VALUES (?, ?)";
 
@@ -386,9 +385,9 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
         }
     }
     private static void insertUserIntoSenderDB(String nickname) {
-        String jdbcURL = "jdbc:mysql://localhost:3306/senderbot?useSSL=false";
-        String username = "root";
-        String password = "root";
+        String jdbcURL = "jdbc:mysql://51.75.70.29:3306/senderbot?useSSL=false";
+        String username = "officeboy";
+        String password = "officeboy";
 
         String sql = "INSERT INTO credentials (login) VALUES (?, ?)";
 
@@ -407,7 +406,8 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
 
     private void OpenWebTg(int userId, String username, Update update,List<String> usernames, List<Long> telegramIds, int startIndex) throws InterruptedException {
 
-            System.setProperty("webdriver.chrome.driver", "./chromedriver.exe");
+//            System.setProperty("webdriver.chrome.driver", "./chromedriver.exe");
+            System.setProperty("webdriver.chrome.driver", "/home/ubuntu/bot/chromedriver");
             WebDriver driver = new ChromeDriver();
             String url = "https://web.telegram.org/";
 
