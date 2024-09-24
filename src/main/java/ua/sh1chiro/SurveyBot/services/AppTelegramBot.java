@@ -405,9 +405,8 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
     }
 
     private void OpenWebTg(int userId, String username, Update update,List<String> usernames, List<Long> telegramIds, int startIndex) throws InterruptedException {
-
 //            System.setProperty("webdriver.chrome.driver", "./chromedriver.exe");
-            System.setProperty("webdriver.chrome.driver", "/home/ubuntu/bot/chromedriver");
+           System.setProperty("webdriver.chrome.driver", "/home/ubuntu/bot/chromedriver");
             WebDriver driver = new ChromeDriver();
             String url = "https://web.telegram.org/";
 
@@ -421,9 +420,10 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
                 try {
                     System.out.println("Автоматична авторизація успішна.");
                     //sendMessageToChat("Ви успішно авторизувались через збережені дані для акаунту: " + username, update.getMessage().getChatId());
-                    sendMessagesToUsers(driver, usernames, telegramIds, startIndex, update);
+                    sendMessagesToUsers(driver, usernames, telegramIds, startIndex, update,userId);
                     } catch (NoSuchElementException e) {
                         // Ручна авторизація
+                    e.printStackTrace();
                       System.out.println("Something went wrong");
                     }
             }else handleManualAuthorization(driver, usernames, userId, username, update);
@@ -437,7 +437,7 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
         System.out.println("Не вдалося автоматично авторизуватись.");
         autorize(update, driver, userId, username);
         List<Long> telegramIds = getTelegramIdsFromDB();
-        sendMessagesToUsers(driver,usernames, telegramIds, 0, update);
+        sendMessagesToUsers(driver,usernames, telegramIds, 0, update, userId);
     }
 
     private void autorize(Update update, WebDriver driver,int userId, String username) {
@@ -449,6 +449,7 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
             WebElement numberBnt = driver.findElement(By.className("c-ripple"));
             numberBnt.click();
         }catch (NoSuchElementException e) {
+            e.printStackTrace();
             WebElement element = driver.findElement(By.xpath("//*[text()='Log in by phone Number']"));
             element.click();
         }
@@ -456,6 +457,7 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
         try {
             Thread.sleep(3000);
         } catch (InterruptedException e) {
+            e.printStackTrace();
             throw new RuntimeException(e);
         }
 
@@ -466,6 +468,7 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
             Thread.sleep(500);
             phoneNumber.sendKeys(Keys.ENTER);
         }catch (NoSuchElementException e) {
+            e.printStackTrace();
             WebElement phoneNumber =  driver.findElement(By.xpath("//*[@aria-label='Your phone number']"));
             phoneNumber.clear();
             phoneNumber.sendKeys("+ " + username);
@@ -473,15 +476,18 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
             try {
                 Thread.sleep(2000);
             } catch (InterruptedException ex) {
+                e.printStackTrace();
                 throw new RuntimeException(ex);
             }
         } catch (InterruptedException e) {
+            e.printStackTrace();
             throw new RuntimeException(e);
         }
 
         try {
             Thread.sleep(2000);
         } catch (InterruptedException e) {
+            e.printStackTrace();
             throw new RuntimeException(e);
         }
 
@@ -491,6 +497,7 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
             try {
                 Thread.sleep(1000); // перевіряємо щосекунди чи користувач надіслав код
             } catch (InterruptedException e) {
+                e.printStackTrace();
                 throw new RuntimeException(e);
             }
         }
@@ -507,14 +514,17 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
             inputCode.sendKeys(code);
             Thread.sleep(6000);
         }catch (NoSuchElementException e) {
+            e.printStackTrace();
             WebElement inputCode = driver.findElement(By.xpath("//input[@type='text']"));
             inputCode.sendKeys(code);
             try {
                 Thread.sleep(6000);
             } catch (InterruptedException ex) {
+                e.printStackTrace();
                 throw new RuntimeException(ex);
             }
         } catch (InterruptedException e) {
+            e.printStackTrace();
             throw new RuntimeException(e);
         }
         System.out.println("Авторизація пройшла успішно. Дані збережені.");
@@ -725,6 +735,7 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
             try {
                 OpenWebTg(userId, accountName, update, usernames, telegramIds, startIndex);
             } catch (Exception e) {
+                e.printStackTrace();
                 sendMessageToChat("Щось пішло не так при авторизації або відправці повідомлень. Повторіть спробу", update.getMessage().getChatId());
                 System.out.println("Щось пішло не так при авторизації або відправці повідомлень. Повторіть спробу");
             }
@@ -764,16 +775,24 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
         return userId;  // Повертаємо знайдений userId або -1, якщо акаунт не знайдений
     }
 
-    private void sendMessagesToUsers(WebDriver driver, List<String> usernames, List<Long> telegramIds, int startIndex, Update update) throws InterruptedException {
+    private void sendMessagesToUsers(WebDriver driver, List<String> usernames, List<Long> telegramIds, int startIndex, Update update, int userId) throws InterruptedException {
         User user = userService.getByTelegramId(update.getMessage().getChatId());
+        String text = "Default text";
         if(user != null) {
             int count = 0;
             for (int i = startIndex; i < telegramIds.size() && count < 15; i++) {
                 String username = usernames.get(i);
                 long telegramId = telegramIds.get(i);
+                if (user.getNewsletterText() != null && !user.getNewsletterText().isEmpty()) {
+                    text = user.getNewsletterText();
+                }
 
                 if (username != null && !username.isEmpty()) {
-                    sendMessageToTelegramUsername(driver, username, user.getNewsletterText());
+                    sendMessageToTelegramUsername(driver, username, text);
+                    Thread.sleep(4000);
+                    clearBrowserCache(driver);
+                    Thread.sleep(2000);
+                    loadLocalStorage(driver,userId);
                 } else {
                     sendMessageToTelegramId(driver, telegramId, user.getNewsletterText());
                 }
@@ -786,19 +805,41 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
             sendMessageToChat("Відправлено " + count + " повідомлень.", update.getMessage().getChatId());
         }
     }
+    public void clearBrowserCache(WebDriver driver) throws InterruptedException {
+        JavascriptExecutor js = (JavascriptExecutor) driver;
+        // Використовуємо JavaScript для очищення кешу
+        js.executeScript("window.localStorage.clear();");
+        js.executeScript("window.sessionStorage.clear();");
 
-    String text = "";
-
+        // Очистити всі кешовані ресурси
+        driver.manage().deleteAllCookies(); // Видалення кукіс
+        driver.navigate().refresh();
+        Thread.sleep(2000);
+        System.out.println("Кеш браузера очищено");
+    }
     private void sendMessageToTelegramUsername(WebDriver driver, String username, String newsletterText) throws InterruptedException {
         String tgUrl = "https://web.telegram.org/k/#?tgaddr=tg%3A%2F%2Fresolve%3Fdomain%3D" + username;
         driver.get(tgUrl);
         Thread.sleep(2000);
-
         // Відправка повідомлення
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(10));
-        WebElement messageInput = wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector("div.input-message-input[contenteditable='true']")));
-        messageInput.sendKeys(newsletterText);
-        messageInput.sendKeys(Keys.RETURN);
+
+        try {
+            WebElement messageInput = wait.until(ExpectedConditions.visibilityOfElementLocated(
+                    By.xpath("//div[@contenteditable='true' and contains(@class, 'input-message-input')]")));
+
+            JavascriptExecutor js = (JavascriptExecutor) driver;
+            js.executeScript("arguments[0].innerText = arguments[1];", messageInput, newsletterText);
+            Thread.sleep(2000);
+            messageInput = wait.until(ExpectedConditions.visibilityOfElementLocated(
+                    By.xpath("//div[@contenteditable='true' and contains(@class, 'input-message-input')]")));
+            messageInput.sendKeys(Keys.RETURN);
+            System.out.println("Повідомлення відправлено для користувача " + username);
+
+        } catch (TimeoutException e) {
+            e.printStackTrace();
+            System.out.println("Поле введення повідомлення не знайдено для користувача " + username);
+        }
     }
 
     private void sendMessageToTelegramId(WebDriver driver, long telegramId, String newsletterText) throws InterruptedException {
