@@ -8,6 +8,7 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.openqa.selenium.*;
 import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.chrome.ChromeDriver;
+import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 import org.springframework.stereotype.Component;
@@ -407,7 +408,10 @@ public class AppTelegramBot  extends TelegramLongPollingBot {
     private void OpenWebTg(int userId, String username, Update update,List<String> usernames, List<Long> telegramIds, int startIndex) throws InterruptedException {
 //            System.setProperty("webdriver.chrome.driver", "./chromedriver.exe");
            System.setProperty("webdriver.chrome.driver", "/home/ubuntu/bot/chromedriver");
-            WebDriver driver = new ChromeDriver();
+        ChromeOptions options = new ChromeOptions();
+        options.addArguments("--headless");
+        options.addArguments("--no-sandbox");
+           WebDriver driver = new ChromeDriver(options);
             String url = "https://web.telegram.org/";
 
             driver.get(url);
